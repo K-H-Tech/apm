@@ -24,7 +24,10 @@ type JWT struct {
 
 // IsExpired will check that the target token has been expired or not.
 func (j *JWT) IsExpired() bool {
-	return j.ExpiresAt.After(time.Now())
+	if j.ExpiresAt == nil {
+		return true // No expiry = expired for safety
+	}
+	return time.Now().After(j.ExpiresAt.Time)
 }
 
 // GetCellphone returns the cellphone from the token

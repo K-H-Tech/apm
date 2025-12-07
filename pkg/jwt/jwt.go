@@ -15,6 +15,9 @@ type JWT struct {
 
 // NewJWT is the JWT factory method
 func NewJWT(secretKey string) *JWT {
+	if len(secretKey) < 64 {
+		panic("JWT secret key must be at least 64 bytes for HS512")
+	}
 	return &JWT{
 		secretKey: []byte(secretKey),
 	}
@@ -46,9 +49,13 @@ func (j *JWT) Verify(ctx context.Context, token string) (*models.JWT, error) {
 		return nil, fmt.Errorf("JWT. error at parsing the token: %w", err)
 	}
 
+	if jwtToken == nil || !jwtToken.Valid {
+		return nil, fmt.Errorf("JWT. token is invalid")
+	}
+
 	claims, ok := jwtToken.Claims.(*models.JWT)
 	if !ok {
-		return nil, fmt.Errorf("JWT. error at asserting the claims to models.JWT: %w", err)
+		return nil, fmt.Errorf("JWT. error at asserting the claims to models.JWT")
 	}
 
 	return claims, nil

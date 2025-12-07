@@ -267,8 +267,23 @@ func (h *PriorityHandler) GetRankings(c *gin.Context) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	// Validate framework parameter
+	validFrameworks := map[string]bool{
+		"rice": true, "ice": true, "moscow": true, "weighted": true,
+	}
+	if !validFrameworks[framework] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid framework"})
+		return
+	}
+
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit < 0 {
+		limit = 20
+	}
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil || offset < 0 {
+		offset = 0
+	}
 
 	orgID := getOrganizationID(c)
 
@@ -349,6 +364,15 @@ func (h *PriorityHandler) GetScoreHistory(c *gin.Context) {
 	}
 
 	framework := c.Param("framework")
+
+	// Validate framework parameter
+	validFrameworks := map[string]bool{
+		"rice": true, "ice": true, "moscow": true, "weighted": true,
+	}
+	if !validFrameworks[framework] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid framework"})
+		return
+	}
 
 	history, err := h.priorityService.GetScoreHistory(c.Request.Context(), prdID, models.PriorityFramework(framework))
 	if err != nil {

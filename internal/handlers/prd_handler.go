@@ -76,6 +76,12 @@ func (h *PRDHandler) Create(c *gin.Context) {
 	userID := getUserID(c)
 	orgID := getOrganizationID(c)
 
+	// Validate authentication - don't proceed with nil UUIDs
+	if userID == uuid.Nil || orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	var templateID *uuid.UUID
 	if req.TemplateID != nil {
 		tid, err := uuid.Parse(*req.TemplateID)
@@ -115,9 +121,22 @@ func (h *PRDHandler) GetByID(c *gin.Context) {
 		return
 	}
 
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	prd, err := h.prdService.GetByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	// Verify PRD belongs to user's organization
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
 
@@ -145,6 +164,12 @@ type ListPRDsResponse struct {
 // @Router /api/v1/prds [get]
 func (h *PRDHandler) List(c *gin.Context) {
 	orgID := getOrganizationID(c)
+
+	// Validate authentication
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
 
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
@@ -209,6 +234,13 @@ func (h *PRDHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	var req UpdatePRDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -220,6 +252,12 @@ func (h *PRDHandler) Update(c *gin.Context) {
 	prd, err := h.prdService.GetByID(ctx, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	// Verify PRD belongs to user's organization
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
 
@@ -251,7 +289,28 @@ func (h *PRDHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.prdService.Delete(c.Request.Context(), id); err != nil {
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization before deleting
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	if err := h.prdService.Delete(ctx, id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -280,6 +339,13 @@ func (h *PRDHandler) UpdateStatus(c *gin.Context) {
 		return
 	}
 
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	var req UpdateStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -288,12 +354,29 @@ func (h *PRDHandler) UpdateStatus(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// Verify PRD belongs to user's organization before updating
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
 	if err := h.prdService.UpdateStatus(ctx, id, models.PRDStatus(req.Status)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	prd, _ := h.prdService.GetByID(ctx, id)
+	prd, err = h.prdService.GetByID(ctx, id)
+	if err != nil {
+		// Status was updated but failed to retrieve - still report success
+		c.JSON(http.StatusOK, gin.H{"message": "status updated"})
+		return
+	}
 	c.JSON(http.StatusOK, prd)
 }
 
@@ -305,7 +388,28 @@ func (h *PRDHandler) ListVersions(c *gin.Context) {
 		return
 	}
 
-	versions, err := h.prdService.ListVersions(c.Request.Context(), id)
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	versions, err := h.prdService.ListVersions(ctx, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -322,13 +426,34 @@ func (h *PRDHandler) GetVersion(c *gin.Context) {
 		return
 	}
 
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	versionNum, err := strconv.Atoi(c.Param("version"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid version number"})
 		return
 	}
 
-	version, err := h.prdService.GetVersion(c.Request.Context(), id, versionNum)
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	version, err := h.prdService.GetVersion(ctx, id, versionNum)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
 		return
@@ -356,8 +481,29 @@ func (h *PRDHandler) CreateVersion(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
+	orgID := getOrganizationID(c)
 
-	version, err := h.prdService.CreateVersion(c.Request.Context(), id, userID, req.Summary)
+	// Validate authentication
+	if userID == uuid.Nil || orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	version, err := h.prdService.CreateVersion(ctx, id, userID, req.Summary)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -381,13 +527,39 @@ func (h *PRDHandler) RestoreVersion(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
+	orgID := getOrganizationID(c)
 
-	if err := h.prdService.RestoreVersion(c.Request.Context(), id, versionNum, userID); err != nil {
+	// Validate authentication
+	if userID == uuid.Nil || orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	if err := h.prdService.RestoreVersion(ctx, id, versionNum, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	prd, _ := h.prdService.GetByID(c.Request.Context(), id)
+	prd, err = h.prdService.GetByID(ctx, id)
+	if err != nil {
+		// Version was restored but failed to retrieve - still report success
+		c.JSON(http.StatusOK, gin.H{"message": "version restored"})
+		return
+	}
 	c.JSON(http.StatusOK, prd)
 }
 
@@ -415,6 +587,12 @@ func (h *PRDHandler) GenerateFromNotes(c *gin.Context) {
 
 	userID := getUserID(c)
 	orgID := getOrganizationID(c)
+
+	// Validate authentication
+	if userID == uuid.Nil || orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
 
 	var templateID *uuid.UUID
 	if req.TemplateID != nil {
@@ -462,13 +640,40 @@ func (h *PRDHandler) Refine(c *gin.Context) {
 		return
 	}
 
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	var req RefineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	prd, err := h.prdService.RefinePRD(c.Request.Context(), id, req.Feedback)
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization
+	existingPRD, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if existingPRD.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	prd, err := h.prdService.RefinePRD(ctx, id, req.Feedback, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -491,7 +696,34 @@ func (h *PRDHandler) GenerateUserStories(c *gin.Context) {
 		return
 	}
 
-	stories, err := h.prdService.GenerateUserStories(c.Request.Context(), id)
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	userID := getUserID(c)
+	if userID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	stories, err := h.prdService.GenerateUserStories(ctx, id, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -513,13 +745,34 @@ func (h *PRDHandler) LinkToJira(c *gin.Context) {
 		return
 	}
 
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	var req LinkToJiraRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := h.prdService.LinkToJira(c.Request.Context(), id, req.EpicKey); err != nil {
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	if err := h.prdService.LinkToJira(ctx, id, req.EpicKey); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -540,13 +793,34 @@ func (h *PRDHandler) LinkToConfluence(c *gin.Context) {
 		return
 	}
 
+	// Authorization check
+	orgID := getOrganizationID(c)
+	if orgID == uuid.Nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	var req LinkToConfluenceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := h.prdService.LinkToConfluence(c.Request.Context(), id, req.PageID); err != nil {
+	ctx := c.Request.Context()
+
+	// Verify PRD belongs to user's organization
+	prd, err := h.prdService.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PRD not found"})
+		return
+	}
+
+	if prd.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	if err := h.prdService.LinkToConfluence(ctx, id, req.PageID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

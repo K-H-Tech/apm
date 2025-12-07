@@ -26,14 +26,22 @@ func ConnectToRedis(redisCfg config.Redis) (*redis.Client, error) {
 		})
 	} else {
 		rdb = redis.NewClient(&redis.Options{
-			Addr:     redisCfg.Addr,
-			Password: redisCfg.Password,
-			DB:       redisCfg.DB,
+			Addr:         redisCfg.Addr,
+			Password:     redisCfg.Password,
+			DB:           redisCfg.DB,
+			MaxRetries:   redisCfg.MaxRetries,
+			PoolSize:     redisCfg.PoolSize,
+			DialTimeout:  redisCfg.DialTimeout,
+			ReadTimeout:  redisCfg.ReadTimeout,
+			WriteTimeout: redisCfg.WriteTimeout,
+			PoolTimeout:  redisCfg.PoolTimeout,
 		})
-
 	}
 
-	if err := rdb.Ping(context.Background()).Err(); err != nil {
+	// Use timeout for Ping to avoid hanging indefinitely
+	ctx, cancel := context.WithTimeout(context.Background(), redisCfg.DialTimeout)
+	defer cancel()
+	if err := rdb.Ping(ctx).Err(); err != nil {
 		return nil, err
 	}
 

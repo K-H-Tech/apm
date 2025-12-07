@@ -4,7 +4,7 @@ import (
 	"github.com/K-H-Tech/apm/internal/contract"
 )
 
-// Middlewares will implement all required ad necessary middlewares for the http server
+// Middlewares will implement all required and necessary middlewares for the http server
 type Middlewares struct {
 	Logger contract.Logger
 }

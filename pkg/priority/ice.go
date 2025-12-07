@@ -65,7 +65,7 @@ type ICEScoreInterpretation struct {
 	Description string
 }
 
-// InterpretScore provides interpretation for an ICE score
+// InterpretICEScore provides interpretation for an ICE score
 func InterpretICEScore(score float64) *ICEScoreInterpretation {
 	switch {
 	case score >= 9:
@@ -163,7 +163,7 @@ func GetEaseGuidance() *ICEComponentGuidance {
 	}
 }
 
-// GetAllGuidance returns guidance for all ICE components
+// GetAllICEGuidance returns guidance for all ICE components
 func GetAllICEGuidance() []*ICEComponentGuidance {
 	return []*ICEComponentGuidance{
 		GetImpactGuidance(),
@@ -174,6 +174,15 @@ func GetAllICEGuidance() []*ICEComponentGuidance {
 
 // CompareICEScores compares two ICE scores and returns which is higher
 func CompareICEScores(a, b *models.ICEScore) int {
+	if a == nil && b == nil {
+		return 0
+	}
+	if a == nil {
+		return -1
+	}
+	if b == nil {
+		return 1
+	}
 	if a.Score > b.Score {
 		return 1
 	}

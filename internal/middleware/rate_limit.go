@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -29,7 +30,9 @@ func DefaultRateLimitConfig() RateLimitConfig {
 		KeyFunc: func(c *gin.Context) string {
 			// Use user ID if authenticated, otherwise IP
 			if userID, exists := c.Get("user_id"); exists {
-				return "user:" + userID.(string)
+				if uid, ok := userID.(string); ok {
+					return "user:" + uid
+				}
 			}
 			return "ip:" + c.ClientIP()
 		},
@@ -76,9 +79,9 @@ func (rl *rateLimiter) allow(key string) bool {
 		}
 		rl.buckets[key] = bucket
 	}
-	rl.mu.Unlock()
-
+	// Lock bucket BEFORE releasing map lock to prevent race with doCleanup
 	bucket.mu.Lock()
+	rl.mu.Unlock()
 	defer bucket.mu.Unlock()
 
 	// Calculate tokens to add based on time elapsed
@@ -110,7 +113,13 @@ func (rl *rateLimiter) remaining(key string) int {
 	bucket.mu.Lock()
 	defer bucket.mu.Unlock()
 
-	return int(bucket.tokens)
+	// Calculate current tokens based on elapsed time (same as allow())
+	now := time.Now()
+	elapsed := now.Sub(bucket.lastUpdate)
+	tokensToAdd := elapsed.Seconds() * float64(rl.config.RequestsPerMinute) / 60.0
+	currentTokens := min(float64(rl.config.BurstSize), bucket.tokens+tokensToAdd)
+
+	return int(currentTokens)
 }
 
 // cleanup removes expired buckets
@@ -148,17 +157,19 @@ func (rl *rateLimiter) stop() {
 	close(rl.stopChan)
 }
 
-// RateLimitMiddleware creates rate limiting middleware
-func RateLimitMiddleware(config RateLimitConfig) gin.HandlerFunc {
+// RateLimitMiddleware creates rate limiting middleware.
+// Returns the middleware handler and a cleanup function that should be called
+// when the middleware is no longer needed to stop the cleanup goroutine.
+func RateLimitMiddleware(config RateLimitConfig) (gin.HandlerFunc, func()) {
 	limiter := newRateLimiter(config)
 
-	return func(c *gin.Context) {
+	handler := func(c *gin.Context) {
 		key := config.KeyFunc(c)
 
 		if !limiter.allow(key) {
 			remaining := limiter.remaining(key)
-			c.Header("X-RateLimit-Limit", string(rune(config.RequestsPerMinute)))
-			c.Header("X-RateLimit-Remaining", string(rune(remaining)))
+			c.Header("X-RateLimit-Limit", strconv.Itoa(config.RequestsPerMinute))
+			c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
 			c.Header("Retry-After", "60")
 
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
@@ -170,6 +181,8 @@ func RateLimitMiddleware(config RateLimitConfig) gin.HandlerFunc {
 
 		c.Next()
 	}
+
+	return handler, limiter.stop
 }
 
 // EndpointRateLimitConfig holds per-endpoint rate limit configuration
@@ -179,8 +192,10 @@ type EndpointRateLimitConfig struct {
 	BurstSize         int
 }
 
-// EndpointRateLimitMiddleware creates per-endpoint rate limiting
-func EndpointRateLimitMiddleware(configs []EndpointRateLimitConfig) gin.HandlerFunc {
+// EndpointRateLimitMiddleware creates per-endpoint rate limiting.
+// Returns the middleware handler and a cleanup function that should be called
+// when the middleware is no longer needed to stop all cleanup goroutines.
+func EndpointRateLimitMiddleware(configs []EndpointRateLimitConfig) (gin.HandlerFunc, func()) {
 	limiters := make(map[string]*rateLimiter)
 
 	for _, cfg := range configs {
@@ -190,14 +205,16 @@ func EndpointRateLimitMiddleware(configs []EndpointRateLimitConfig) gin.HandlerF
 			CleanupInterval:   5 * time.Minute,
 			KeyFunc: func(c *gin.Context) string {
 				if userID, exists := c.Get("user_id"); exists {
-					return "user:" + userID.(string)
+					if uid, ok := userID.(string); ok {
+						return "user:" + uid
+					}
 				}
 				return "ip:" + c.ClientIP()
 			},
 		})
 	}
 
-	return func(c *gin.Context) {
+	handler := func(c *gin.Context) {
 		limiter, exists := limiters[c.FullPath()]
 		if !exists {
 			c.Next()
@@ -214,10 +231,20 @@ func EndpointRateLimitMiddleware(configs []EndpointRateLimitConfig) gin.HandlerF
 
 		c.Next()
 	}
+
+	cleanup := func() {
+		for _, limiter := range limiters {
+			limiter.stop()
+		}
+	}
+
+	return handler, cleanup
 }
 
-// AIRateLimitMiddleware creates rate limiting specifically for AI endpoints
-func AIRateLimitMiddleware() gin.HandlerFunc {
+// AIRateLimitMiddleware creates rate limiting specifically for AI endpoints.
+// Returns the middleware handler and a cleanup function that should be called
+// when the middleware is no longer needed to stop the cleanup goroutine.
+func AIRateLimitMiddleware() (gin.HandlerFunc, func()) {
 	// Lower rate limits for expensive AI operations
 	config := RateLimitConfig{
 		RequestsPerMinute: 10, // 10 AI requests per minute
@@ -226,7 +253,9 @@ func AIRateLimitMiddleware() gin.HandlerFunc {
 		KeyFunc: func(c *gin.Context) string {
 			// Rate limit by user
 			if userID, exists := c.Get("user_id"); exists {
-				return "ai:user:" + userID.(string)
+				if uid, ok := userID.(string); ok {
+					return "ai:user:" + uid
+				}
 			}
 			return "ai:ip:" + c.ClientIP()
 		},
@@ -234,7 +263,7 @@ func AIRateLimitMiddleware() gin.HandlerFunc {
 
 	limiter := newRateLimiter(config)
 
-	return func(c *gin.Context) {
+	handler := func(c *gin.Context) {
 		key := config.KeyFunc(c)
 
 		if !limiter.allow(key) {
@@ -248,6 +277,8 @@ func AIRateLimitMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+
+	return handler, limiter.stop
 }
 
 func min(a, b float64) float64 {

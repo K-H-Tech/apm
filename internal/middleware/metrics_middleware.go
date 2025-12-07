@@ -9,6 +9,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// NOTE: These metrics use promauto which auto-registers with default registry.
+// In test environments, use a custom registry to avoid duplicate registration panics.
 var (
 	requestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -58,7 +60,12 @@ func (m *Middlewares) HTTPMetrics() gin.HandlerFunc {
 		// execute normal process.
 		ctx.Next()
 
-		labels := []string{ctx.FullPath(), r.Method, strconv.Itoa(w.Status())}
+		// Handle empty path for unmatched routes (404s)
+		path := ctx.FullPath()
+		if path == "" {
+			path = "unknown"
+		}
+		labels := []string{path, r.Method, strconv.Itoa(w.Status())}
 
 		// set requests total
 		requestsTotal.WithLabelValues(labels...).Inc()

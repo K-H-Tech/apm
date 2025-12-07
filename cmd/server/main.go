@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
@@ -59,7 +63,7 @@ func LoadConfig() *Config {
 		CORSOrigins:  getEnvSlice("CORS_ORIGINS", []string{"http://localhost:3000"}),
 
 		// Database
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://localhost:5432/apm?sslmode=disable"),
+		DatabaseURL: getEnv("DATABASE_URL", "postgres://localhost:5432/apm?sslmode=require"),
 
 		// LLM
 		OpenAIKey:       getEnv("OPENAI_API_KEY", ""),
@@ -167,27 +171,22 @@ func main() {
 	api := router.Group("/api/v1")
 
 	// Add auth middleware
+	// Note: Auth routes are registered outside the /api/v1 group, so they bypass this middleware.
+	// SkipPaths removed as they were ineffective (paths didn't include /api/v1 prefix).
 	api.Use(middleware.AuthMiddleware(middleware.AuthConfig{
 		UserRepo: userRepo,
 		OrgRepo:  orgRepo,
-		SkipPaths: []string{
-			"/auth/atlassian",
-			"/auth/atlassian/callback",
-			"/health",
-		},
 	}))
 
 	// Add rate limiting
-	api.Use(middleware.RateLimitMiddleware(middleware.DefaultRateLimitConfig()))
+	rateLimitHandler, rateLimitCleanup := middleware.RateLimitMiddleware(middleware.DefaultRateLimitConfig())
+	api.Use(rateLimitHandler)
 
 	// Register routes
 	prdHandler.RegisterRoutes(api)
 	priorityHandler.RegisterRoutes(api)
 
-	// AI routes with stricter rate limiting
-	aiRoutes := api.Group("/ai")
-	aiRoutes.Use(middleware.AIRateLimitMiddleware())
-	// AI routes are already registered via prdHandler.RegisterRoutes
+	// Note: AI routes are registered via prdHandler.RegisterRoutes with standard rate limiting
 
 	// Create HTTP server
 	server := &http.Server{
@@ -219,6 +218,9 @@ func main() {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
+	// Cleanup rate limiter to stop goroutines
+	rateLimitCleanup()
+
 	log.Println("Server exited")
 }
 
@@ -234,9 +236,11 @@ func initLLMProvider(cfg *Config) contract.LLMProvider {
 		MaxRetries:      3,
 	}
 
-	// Set default model based on available providers
-	if cfg.DefaultModel != "" {
+	// Set provider-specific models - don't apply same model name to both providers
+	// as they use different model naming conventions
+	if cfg.DefaultProvider == "openai" && cfg.DefaultModel != "" {
 		llmConfig.OpenAIModel = cfg.DefaultModel
+	} else if cfg.DefaultProvider == "anthropic" && cfg.DefaultModel != "" {
 		llmConfig.AnthropicModel = cfg.DefaultModel
 	}
 
@@ -281,7 +285,7 @@ func initLLMProvider(cfg *Config) contract.LLMProvider {
 
 	// Use multi-provider with fallback if available
 	if fallback != nil {
-		return llm.NewMultiProvider(primary, fallback, 3)
+		return llm.NewMultiProvider(primary, fallback)
 	}
 
 	return primary
@@ -291,6 +295,14 @@ func initLLMProvider(cfg *Config) contract.LLMProvider {
 func validateConfig(cfg *Config) error {
 	if cfg.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
+	}
+
+	if cfg.EncryptionKey == "" {
+		return fmt.Errorf("ENCRYPTION_KEY is required")
+	}
+
+	if len(cfg.EncryptionKey) < 32 {
+		return fmt.Errorf("ENCRYPTION_KEY must be at least 32 bytes for secure AES-256 encryption")
 	}
 
 	if cfg.AtlassianClientID == "" || cfg.AtlassianClientSecret == "" {
@@ -360,18 +372,67 @@ func trim(s string) string {
 	return s[start:end]
 }
 
-// simpleEncrypter is a placeholder encrypter
-// In production, use proper AES encryption from pkg/crypto
+// simpleEncrypter implements AES-256-GCM encryption for sensitive data
 type simpleEncrypter struct {
 	key string
 }
 
 func (e *simpleEncrypter) Encrypt(plaintext string) (string, error) {
-	// Placeholder - implement proper encryption
-	return plaintext, nil
+	key := []byte(e.key)
+	if len(key) < 32 {
+		return "", fmt.Errorf("encryption key too short: need at least 32 bytes")
+	}
+
+	block, err := aes.NewCipher(key[:32])
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
 func (e *simpleEncrypter) Decrypt(ciphertext string) (string, error) {
-	// Placeholder - implement proper decryption
-	return ciphertext, nil
+	data, err := base64.StdEncoding.DecodeString(ciphertext)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode base64: %w", err)
+	}
+
+	key := []byte(e.key)
+	if len(key) < 32 {
+		return "", fmt.Errorf("encryption key too short: need at least 32 bytes")
+	}
+
+	block, err := aes.NewCipher(key[:32])
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	nonceSize := gcm.NonceSize()
+	if len(data) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+
+	nonce, ciphertextBytes := data[:nonceSize], data[nonceSize:]
+	plaintext, err := gcm.Open(nil, nonce, ciphertextBytes, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	return string(plaintext), nil
 }

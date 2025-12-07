@@ -49,7 +49,11 @@ type TemplateSchema struct {
 
 // Value implements driver.Valuer for database storage
 func (s TemplateSchema) Value() (driver.Value, error) {
-	return json.Marshal(s)
+	bytes, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	return bytes, nil
 }
 
 // Scan implements sql.Scanner for database retrieval
@@ -58,9 +62,14 @@ func (s *TemplateSchema) Scan(value interface{}) error {
 		*s = TemplateSchema{}
 		return nil
 	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New("type assertion to []byte failed")
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return errors.New("unsupported type for TemplateSchema")
 	}
 	return json.Unmarshal(bytes, s)
 }
@@ -119,24 +128,33 @@ type UpdateTemplateRequest struct {
 
 // ValidateAgainstSchema validates PRD content against a template schema
 func (t *PRDTemplate) ValidateAgainstSchema(content *PRDContent) []string {
-	var errors []string
+	if content == nil {
+		return []string{"content is required"}
+	}
+
+	var validationErrors []string
 
 	contentMap := make(map[string]interface{})
 
 	// Convert content to map for validation
-	contentBytes, _ := json.Marshal(content)
-	json.Unmarshal(contentBytes, &contentMap)
+	contentBytes, err := json.Marshal(content)
+	if err != nil {
+		return []string{"failed to process content: " + err.Error()}
+	}
+	if err := json.Unmarshal(contentBytes, &contentMap); err != nil {
+		return []string{"failed to process content: " + err.Error()}
+	}
 
 	for _, section := range t.ContentSchema.Sections {
 		if section.Required {
 			value, exists := contentMap[section.Name]
 			if !exists || isEmpty(value) {
-				errors = append(errors, "missing required section: "+section.Label)
+				validationErrors = append(validationErrors, "missing required section: "+section.Label)
 			}
 		}
 	}
 
-	return errors
+	return validationErrors
 }
 
 // isEmpty checks if a value is empty

@@ -8,6 +8,7 @@ import (
 
 	"github.com/K-H-Tech/apm/internal/models"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 var (
@@ -19,6 +20,12 @@ var (
 
 	// ErrUserAlreadyExists is returned when trying to create a duplicate user
 	ErrUserAlreadyExists = errors.New("user already exists")
+
+	// ErrOrganizationAlreadyExists is returned when trying to create a duplicate organization
+	ErrOrganizationAlreadyExists = errors.New("organization already exists")
+
+	// ErrMemberNotFound is returned when an organization member is not found
+	ErrMemberNotFound = errors.New("member not found in organization")
 )
 
 // UserRepository implements contract.UserRepository
@@ -61,7 +68,15 @@ func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
 		user.UpdatedAt,
 	)
 
-	return err
+	if err != nil {
+		// Check for PostgreSQL unique constraint violation (code 23505)
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return ErrUserAlreadyExists
+		}
+		return err
+	}
+
+	return nil
 }
 
 // GetByID retrieves a user by ID
@@ -333,7 +348,15 @@ func (r *OrganizationRepository) Create(ctx context.Context, org *models.Organiz
 		org.UpdatedAt,
 	)
 
-	return err
+	if err != nil {
+		// Check for PostgreSQL unique constraint violation (code 23505)
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return ErrOrganizationAlreadyExists
+		}
+		return err
+	}
+
+	return nil
 }
 
 // GetByID retrieves an organization by ID
@@ -537,8 +560,20 @@ func (r *OrganizationRepository) AddUserToOrganization(ctx context.Context, memb
 func (r *OrganizationRepository) RemoveUserFromOrganization(ctx context.Context, orgID, userID uuid.UUID) error {
 	query := `DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2`
 
-	_, err := r.db.ExecContext(ctx, query, orgID, userID)
-	return err
+	result, err := r.db.ExecContext(ctx, query, orgID, userID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrMemberNotFound
+	}
+
+	return nil
 }
 
 // GetOrganizationMembers retrieves all members of an organization

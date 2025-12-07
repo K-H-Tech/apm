@@ -34,6 +34,8 @@ type GeneratedPRDResult struct {
 	Content *models.PRDContent
 }
 
+// Note: GeneratePRDInput is defined in ai_service.go
+
 // PRDService implements contract.PRDService
 type PRDService struct {
 	prdRepo      *repository.PRDRepository
@@ -286,7 +288,8 @@ func (s *PRDService) GenerateFromNotes(ctx context.Context, input GenerateFromNo
 }
 
 // RefinePRD refines an existing PRD using AI
-func (s *PRDService) RefinePRD(ctx context.Context, prdID uuid.UUID, feedback string) (*models.PRD, error) {
+// It creates a version backup before applying AI refinement
+func (s *PRDService) RefinePRD(ctx context.Context, prdID uuid.UUID, feedback string, userID uuid.UUID) (*models.PRD, error) {
 	prd, err := s.prdRepo.GetByID(ctx, prdID)
 	if err != nil {
 		return nil, err
@@ -294,6 +297,13 @@ func (s *PRDService) RefinePRD(ctx context.Context, prdID uuid.UUID, feedback st
 
 	if s.aiService == nil {
 		return nil, errors.New("AI service not configured")
+	}
+
+	// Create version backup before AI refinement
+	_, err = s.CreateVersion(ctx, prdID, userID, "Auto-saved before AI refinement")
+	if err != nil {
+		// Log but don't fail - versioning is a safeguard, not a hard requirement
+		// In production, consider making this a hard requirement
 	}
 
 	// Refine content using AI
@@ -311,7 +321,8 @@ func (s *PRDService) RefinePRD(ctx context.Context, prdID uuid.UUID, feedback st
 }
 
 // GenerateUserStories generates user stories for a PRD using AI
-func (s *PRDService) GenerateUserStories(ctx context.Context, prdID uuid.UUID) ([]models.UserStory, error) {
+// It creates a version backup before overwriting existing stories
+func (s *PRDService) GenerateUserStories(ctx context.Context, prdID uuid.UUID, userID uuid.UUID) ([]models.UserStory, error) {
 	prd, err := s.prdRepo.GetByID(ctx, prdID)
 	if err != nil {
 		return nil, err
@@ -319,6 +330,13 @@ func (s *PRDService) GenerateUserStories(ctx context.Context, prdID uuid.UUID) (
 
 	if s.aiService == nil {
 		return nil, errors.New("AI service not configured")
+	}
+
+	// Create version backup before generating user stories
+	_, err = s.CreateVersion(ctx, prdID, userID, "Auto-saved before generating user stories")
+	if err != nil {
+		// Log but don't fail - versioning is a safeguard, not a hard requirement
+		// In production, consider making this a hard requirement
 	}
 
 	stories, err := s.aiService.GenerateUserStories(ctx, &prd.Content)

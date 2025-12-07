@@ -119,6 +119,9 @@ func (s *AIService) RefinePRD(ctx context.Context, content *models.PRDContent, f
 	if s.provider == nil {
 		return nil, errors.New("LLM provider not configured")
 	}
+	if content == nil {
+		return nil, errors.New("content cannot be nil")
+	}
 
 	// Marshal current content to JSON
 	currentJSON, err := json.Marshal(content)
@@ -209,16 +212,17 @@ func (s *AIService) GenerateUserStories(ctx context.Context, content *models.PRD
 	}
 
 	// Convert to domain model
+	// Note: story.Notes from AI response is not mapped as UserStory model doesn't have Notes field
 	stories := make([]models.UserStory, len(result.UserStories))
-	for i, s := range result.UserStories {
+	for i, story := range result.UserStories {
 		stories[i] = models.UserStory{
-			ID:                 s.ID,
-			AsA:                s.AsA,
-			IWant:              s.IWant,
-			SoThat:             s.SoThat,
-			AcceptanceCriteria: s.AcceptanceCriteria,
-			Priority:           s.Priority,
-			EstimatePoints:     s.EstimatePoints,
+			ID:                 story.ID,
+			AsA:                story.AsA,
+			IWant:              story.IWant,
+			SoThat:             story.SoThat,
+			AcceptanceCriteria: story.AcceptanceCriteria,
+			Priority:           story.Priority,
+			EstimatePoints:     story.EstimatePoints,
 		}
 	}
 
@@ -229,6 +233,9 @@ func (s *AIService) GenerateUserStories(ctx context.Context, content *models.PRD
 func (s *AIService) GenerateAcceptanceCriteria(ctx context.Context, story *models.UserStory) ([]string, error) {
 	if s.provider == nil {
 		return nil, errors.New("LLM provider not configured")
+	}
+	if story == nil {
+		return nil, errors.New("story cannot be nil")
 	}
 
 	tmpl, err := template.New("criteria").Parse(prompts.AcceptanceCriteriaPrompt)

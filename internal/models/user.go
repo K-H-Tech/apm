@@ -59,9 +59,9 @@ const (
 
 // UserWithOrg represents a user with their organization context
 type UserWithOrg struct {
-	User         *User         `json:"user"`
-	Organization *Organization `json:"organization"`
-	Role         string        `json:"role"`
+	User         *User            `json:"user"`
+	Organization *Organization    `json:"organization"`
+	Role         OrganizationRole `json:"role"`
 }
 
 // AtlassianTokens holds decrypted OAuth tokens for Atlassian API calls

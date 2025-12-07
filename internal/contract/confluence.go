@@ -75,8 +75,9 @@ type ConfluenceAttachment struct {
 
 // ConfluenceClientConfig represents configuration for Confluence client
 type ConfluenceClientConfig struct {
-	BaseURL     string `yaml:"BASE_URL"`
-	CloudID     string `yaml:"CLOUD_ID"`
+	BaseURL string `yaml:"BASE_URL"`
+	CloudID string `yaml:"CLOUD_ID"`
+	// AccessToken contains OAuth credentials - do not log or expose
 	AccessToken string // Set at runtime from OAuth
 	Timeout     int    `yaml:"TIMEOUT_SECONDS"`
 	MaxRetries  int    `yaml:"MAX_RETRIES"`

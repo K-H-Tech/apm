@@ -109,15 +109,27 @@ func AuthMiddleware(config AuthConfig) gin.HandlerFunc {
 
 		if orgIDStr != "" {
 			orgID, err := uuid.Parse(orgIDStr)
-			if err == nil {
-				// Verify user belongs to organization
-				orgs, _ := config.OrgRepo.GetUserOrganizations(c.Request.Context(), user.ID)
-				for _, org := range orgs {
-					if org.OrganizationID == orgID {
-						c.Set("organization_id", orgID)
-						c.Set("organization_role", org.Role)
-						break
-					}
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+					"error": "invalid organization ID format",
+				})
+				return
+			}
+
+			// Verify user belongs to organization
+			orgs, err := config.OrgRepo.GetUserOrganizations(c.Request.Context(), user.ID)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+					"error": "failed to verify organization membership",
+				})
+				return
+			}
+
+			for _, org := range orgs {
+				if org.OrganizationID == orgID {
+					c.Set("organization_id", orgID)
+					c.Set("organization_role", org.Role)
+					break
 				}
 			}
 		}
@@ -168,6 +180,7 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 }
 
 // OptionalAuth allows both authenticated and unauthenticated requests
+// If authentication is provided but invalid/expired, the request proceeds as unauthenticated
 func OptionalAuth(config AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -192,6 +205,13 @@ func OptionalAuth(config AuthConfig) gin.HandlerFunc {
 
 		user, err := config.UserRepo.GetByID(c.Request.Context(), userID)
 		if err != nil {
+			c.Next()
+			return
+		}
+
+		// Check if Atlassian tokens are expired - if so, don't set user context
+		// (request proceeds as unauthenticated for optional auth)
+		if user.AtlassianTokenExpiry != nil && user.AtlassianTokenExpiry.Before(time.Now()) {
 			c.Next()
 			return
 		}

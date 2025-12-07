@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/K-H-Tech/apm/internal/contract"
@@ -74,6 +75,7 @@ func DefaultConfig() *Config {
 type ProviderFactory struct {
 	config    *Config
 	providers map[ProviderType]contract.LLMProvider
+	mu        sync.RWMutex
 }
 
 // NewProviderFactory creates a new provider factory
@@ -86,13 +88,24 @@ func NewProviderFactory(config *Config) *ProviderFactory {
 
 // GetProvider returns the specified provider
 func (f *ProviderFactory) GetProvider(providerType ProviderType) (contract.LLMProvider, error) {
-	// Check if already created
+	// Check if already created (read lock)
+	f.mu.RLock()
+	provider, ok := f.providers[providerType]
+	f.mu.RUnlock()
+	if ok {
+		return provider, nil
+	}
+
+	// Acquire write lock for creation
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Double-check after acquiring write lock
 	if provider, ok := f.providers[providerType]; ok {
 		return provider, nil
 	}
 
 	// Create provider
-	var provider contract.LLMProvider
 	var err error
 
 	switch providerType {
@@ -125,17 +138,15 @@ func (f *ProviderFactory) GetDefaultProvider() (contract.LLMProvider, error) {
 
 // MultiProvider wraps multiple providers with fallback support
 type MultiProvider struct {
-	primary   contract.LLMProvider
-	fallback  contract.LLMProvider
-	maxRetries int
+	primary  contract.LLMProvider
+	fallback contract.LLMProvider
 }
 
 // NewMultiProvider creates a provider with fallback support
-func NewMultiProvider(primary, fallback contract.LLMProvider, maxRetries int) *MultiProvider {
+func NewMultiProvider(primary, fallback contract.LLMProvider) *MultiProvider {
 	return &MultiProvider{
-		primary:   primary,
-		fallback:  fallback,
-		maxRetries: maxRetries,
+		primary:  primary,
+		fallback: fallback,
 	}
 }
 

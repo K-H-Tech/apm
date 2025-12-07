@@ -1,3 +1,6 @@
+# NOTE: Create a .env file with the following variables for production:
+# MYSQL_ROOT_PASSWORD, MYSQL_USER, MYSQL_PASSWORD
+# MONGO_INITDB_ROOT_USERNAME, MONGO_INITDB_ROOT_PASSWORD
 services:
   mariadb:
     # connect to container terminal: docker-compose -f docker/docker-compose.yaml exec mariadb mysql -u admin -p -D tax_manager
@@ -5,11 +8,11 @@ services:
     command: "--default-authentication-plugin=mysql_native_password"
     restart: always
     environment:
-      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root_password}
       - MYSQL_DATABASE=tax_manager
       - MARIADB_DATABASE=tax_manager
-      - MYSQL_USER=admin
-      - MYSQL_PASSWORD=admin_password
+      - MYSQL_USER=${MYSQL_USER:-admin}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-admin_password}
     ports:
       - 3306:3306
     volumes:
@@ -22,8 +25,8 @@ services:
     ports:
       - 27017:27017
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: admin_password
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin_password}
       MONGO_INITDB_DATABASE: tax_manager
     volumes:
       - ./db_data/mongodb:/data/db

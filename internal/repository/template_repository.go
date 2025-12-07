@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/K-H-Tech/apm/internal/models"
@@ -93,7 +94,10 @@ func (r *TemplateRepository) GetByID(ctx context.Context, id uuid.UUID) (*models
 	}
 
 	if orgID.Valid {
-		oid, _ := uuid.Parse(orgID.String)
+		oid, err := uuid.Parse(orgID.String)
+		if err != nil {
+			return nil, fmt.Errorf("invalid organization_id UUID: %w", err)
+		}
 		template.OrganizationID = &oid
 	}
 
@@ -204,7 +208,10 @@ func (r *TemplateRepository) ListByOrganization(ctx context.Context, orgID uuid.
 		}
 
 		if organizationID.Valid {
-			oid, _ := uuid.Parse(organizationID.String)
+			oid, err := uuid.Parse(organizationID.String)
+			if err != nil {
+				return nil, fmt.Errorf("invalid organization_id UUID: %w", err)
+			}
 			template.OrganizationID = &oid
 		}
 
@@ -254,7 +261,10 @@ func (r *TemplateRepository) ListByType(ctx context.Context, orgID uuid.UUID, te
 		}
 
 		if organizationID.Valid {
-			oid, _ := uuid.Parse(organizationID.String)
+			oid, err := uuid.Parse(organizationID.String)
+			if err != nil {
+				return nil, fmt.Errorf("invalid organization_id UUID: %w", err)
+			}
 			template.OrganizationID = &oid
 		}
 
@@ -304,7 +314,10 @@ func (r *TemplateRepository) GetDefault(ctx context.Context, orgID uuid.UUID, te
 	}
 
 	if organizationID.Valid {
-		oid, _ := uuid.Parse(organizationID.String)
+		oid, err := uuid.Parse(organizationID.String)
+		if err != nil {
+			return nil, fmt.Errorf("invalid organization_id UUID: %w", err)
+		}
 		template.OrganizationID = &oid
 	}
 

@@ -15,8 +15,13 @@ type AESCrypt struct {
 }
 
 // NewAESCrypt is the AESCrypt factory method
-func NewAESCrypt(secretKey []byte) *AESCrypt {
-	return &AESCrypt{secretKey: secretKey}
+func NewAESCrypt(secretKey []byte) (*AESCrypt, error) {
+	if len(secretKey) != 16 && len(secretKey) != 24 && len(secretKey) != 32 {
+		return nil, fmt.Errorf("AESCrypt: invalid key length %d, must be 16, 24, or 32 bytes", len(secretKey))
+	}
+	keyCopy := make([]byte, len(secretKey))
+	copy(keyCopy, secretKey)
+	return &AESCrypt{secretKey: keyCopy}, nil
 }
 
 // Encrypt will encrypt the array of input bytes using aes algorithm

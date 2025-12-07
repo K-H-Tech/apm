@@ -386,6 +386,7 @@ func CompareWeightedScores(a, b *WeightedScore) int {
 }
 
 // RankItems ranks a list of items by their weighted scores
+// Items with tied scores receive the same rank (standard competition ranking)
 func RankItems(items []WeightedScoredItem) []RankedItem {
 	// Sort by score descending
 	sort.Slice(items, func(i, j int) bool {
@@ -393,9 +394,14 @@ func RankItems(items []WeightedScoredItem) []RankedItem {
 	})
 
 	ranked := make([]RankedItem, len(items))
+	currentRank := 1
 	for i, item := range items {
+		// Update rank only when score is different from previous item
+		if i > 0 && items[i].Score.TotalScore < items[i-1].Score.TotalScore {
+			currentRank = i + 1
+		}
 		ranked[i] = RankedItem{
-			Rank:  i + 1,
+			Rank:  currentRank,
 			ID:    item.ID,
 			Name:  item.Name,
 			Score: item.Score,
@@ -488,9 +494,18 @@ func (w *WeightedCalculator) AnalyzeSensitivity(params *WeightedParams, criterio
 			continue
 		}
 
+		// Find the actual normalized weight from the result
+		var actualNewWeight float64
+		for _, r := range modifiedResult.Criteria {
+			if r.Name == criterionName {
+				actualNewWeight = r.Weight
+				break
+			}
+		}
+
 		results = append(results, ScoreVariation{
 			WeightChange: change,
-			NewWeight:    newWeight,
+			NewWeight:    actualNewWeight,
 			NewScore:     modifiedResult.TotalScore,
 			ScoreChange:  modifiedResult.TotalScore - baseResult.TotalScore,
 		})

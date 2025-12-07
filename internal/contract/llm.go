@@ -78,12 +78,18 @@ type StreamChunk struct {
 	// Done indicates if this is the final chunk
 	Done bool `json:"done"`
 
-	// Error contains any error that occurred
-	Error error `json:"error,omitempty"`
+	// Error contains any error message that occurred
+	// Note: Using string instead of error for proper JSON serialization
+	Error error `json:"-"`
+
+	// ErrorMessage contains the error as a string for JSON serialization
+	ErrorMessage string `json:"error,omitempty"`
 
 	// FinishReason is set on the final chunk
 	FinishReason string `json:"finish_reason,omitempty"`
 }
+
+// Note: ConsistencyReport is defined in prd.go
 
 // LLMConfig represents configuration for an LLM provider
 type LLMConfig struct {

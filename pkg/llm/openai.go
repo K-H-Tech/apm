@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/K-H-Tech/apm/internal/contract"
@@ -268,16 +270,26 @@ func (o *OpenAIProvider) StreamText(ctx context.Context, req contract.GenerateRe
 		}
 		defer resp.Body.Close()
 
-		// Read SSE stream
-		decoder := json.NewDecoder(resp.Body)
+		// Check HTTP status before parsing stream
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			ch <- contract.StreamChunk{
+				Error: fmt.Errorf("API error %d: %s", resp.StatusCode, string(body)),
+				Done:  true,
+			}
+			return
+		}
+
+		// Read SSE stream with proper line-based parsing
+		reader := bufio.NewReader(resp.Body)
 		for {
 			select {
 			case <-ctx.Done():
 				ch <- contract.StreamChunk{Error: ctx.Err(), Done: true}
 				return
 			default:
-				var event map[string]interface{}
-				if err := decoder.Decode(&event); err != nil {
+				line, err := reader.ReadString('\n')
+				if err != nil {
 					if errors.Is(err, io.EOF) {
 						ch <- contract.StreamChunk{Done: true}
 						return
@@ -286,9 +298,31 @@ func (o *OpenAIProvider) StreamText(ctx context.Context, req contract.GenerateRe
 					return
 				}
 
-				// Parse delta content
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				if !strings.HasPrefix(line, "data: ") {
+					continue
+				}
+				data := strings.TrimPrefix(line, "data: ")
+				if data == "[DONE]" {
+					ch <- contract.StreamChunk{Done: true}
+					return
+				}
+
+				var event map[string]interface{}
+				if err := json.Unmarshal([]byte(data), &event); err != nil {
+					ch <- contract.StreamChunk{Error: err, Done: true}
+					return
+				}
+
+				// Parse delta content with safe type assertions
 				if choices, ok := event["choices"].([]interface{}); ok && len(choices) > 0 {
-					choice := choices[0].(map[string]interface{})
+					choice, ok := choices[0].(map[string]interface{})
+					if !ok {
+						continue
+					}
 					if delta, ok := choice["delta"].(map[string]interface{}); ok {
 						if content, ok := delta["content"].(string); ok {
 							ch <- contract.StreamChunk{Text: content}

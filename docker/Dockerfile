@@ -17,16 +17,7 @@ RUN apk update && \
     tzdata \
     bash \
     ca-certificates \
-    curl \
-    redis \
-    gcompat \
-    bind-tools \
-    yq \
-    jq \
-    busybox-extras \
-    zip \
-    unzip \
-    tcpdump
+    gcompat
 
 COPY --from=builder /build/server /usr/bin/tm-server
 

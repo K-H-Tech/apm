@@ -74,7 +74,7 @@ func (m MoSCoWCategory) Priority() int {
 // RICEParams represents input parameters for RICE scoring
 type RICEParams struct {
 	Reach      int `json:"reach" binding:"required,min=1"`       // Users per quarter
-	Impact     int `json:"impact" binding:"required"`            // 25, 50, 100, 200, 300
+	Impact     int `json:"impact" binding:"required,oneof=25 50 100 200 300"` // 25, 50, 100, 200, 300
 	Confidence int `json:"confidence" binding:"required,min=50,max=100"` // 50, 80, 100
 	Effort     int `json:"effort" binding:"required,min=1"`      // Person-weeks
 }

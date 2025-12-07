@@ -21,6 +21,7 @@ import (
     "os"
     "time"
 
+    "github.com/jackc/pgx/v5"
     "github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -565,4 +566,4 @@ func TestGetUser(t *testing.T) {
 3. **Don't use string concatenation for queries** - SQL injection risk
 4. **Don't forget rows.Close()** - Leaks connections
 5. **Don't ignore rows.Err()** - May contain errors
-6. **Avoid SELECT *** - Specify columns explicitly
+6. **Avoid `SELECT *`** - Specify columns explicitly

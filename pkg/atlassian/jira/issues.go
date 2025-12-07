@@ -449,6 +449,10 @@ func (c *Client) CreateSubtask(ctx context.Context, parentKey, summary, descript
 		return nil, err
 	}
 
+	if parent.Fields.Project == nil {
+		return nil, fmt.Errorf("parent issue %s has no project information", parentKey)
+	}
+
 	req := &CreateIssueRequest{
 		Fields: CreateIssueFields{
 			Project:   ProjectRef{Key: parent.Fields.Project.Key},

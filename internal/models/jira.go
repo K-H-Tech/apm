@@ -47,7 +47,7 @@ type JiraIssueUpdate struct {
 
 // JiraBulkUpdate represents a bulk update operation
 type JiraBulkUpdate struct {
-	IssueKey string          `json:"issue_key"`
+	IssueKey string          `json:"issue_key" binding:"required"`
 	Update   JiraIssueUpdate `json:"update"`
 }
 

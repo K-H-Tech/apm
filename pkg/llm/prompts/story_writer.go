@@ -11,8 +11,8 @@ Problem Statement: {{.ProblemStatement}}
 User Personas:
 {{range .Personas}}
 - {{.Name}}: {{.Description}}
-  Goals: {{range .Goals}}{{.}}, {{end}}
-  Pain Points: {{range .PainPoints}}{{.}}, {{end}}
+  Goals: {{range $i, $goal := .Goals}}{{if $i}}, {{end}}{{$goal}}{{end}}
+  Pain Points: {{range $i, $pain := .PainPoints}}{{if $i}}, {{end}}{{$pain}}{{end}}
 {{end}}
 
 Generate comprehensive user stories following these guidelines:
@@ -23,7 +23,7 @@ Generate comprehensive user stories following these guidelines:
    - Provide clear value to the user
    - Be testable
 3. Include 3-5 specific, testable acceptance criteria per story
-4. Suggest story point estimates using Fibonacci (1, 2, 3, 5, 8, 13)
+4. Suggest story point estimates using Fibonacci (1, 2, 3, 5, 8, 13, 21)
 5. Assign priority (high, medium, low) based on user value and dependencies
 
 Generate 5-10 user stories that together deliver the PRD's goals.

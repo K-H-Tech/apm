@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/K-H-Tech/apm/internal/models"
 	"github.com/K-H-Tech/apm/internal/repository"
@@ -186,7 +187,10 @@ func (s *PriorityService) CalculateWeighted(ctx context.Context, input Calculate
 	}
 
 	// Serialize criteria to JSON for storage
-	criteriaJSON, _ := serializeWeightedCriteria(input.Criteria)
+	criteriaJSON, err := serializeWeightedCriteria(input.Criteria)
+	if err != nil {
+		return nil, err
+	}
 
 	score := &models.PriorityScore{
 		ID:             uuid.New(),
@@ -206,20 +210,11 @@ func (s *PriorityService) CalculateWeighted(ctx context.Context, input Calculate
 
 // serializeWeightedCriteria converts weighted criteria to JSON string
 func serializeWeightedCriteria(criteria []priority.WeightedCriterion) (string, error) {
-	// Simple JSON serialization
-	result := "["
-	for i, c := range criteria {
-		if i > 0 {
-			result += ","
-		}
-		result += `{"name":"` + c.Name + `","weight":` + formatFloat(c.Weight) + `,"score":` + formatFloat(c.Score) + `}`
+	bytes, err := json.Marshal(criteria)
+	if err != nil {
+		return "", err
 	}
-	result += "]"
-	return result, nil
-}
-
-func formatFloat(f float64) string {
-	return string(rune(int(f*100)/100)) // Simple formatting
+	return string(bytes), nil
 }
 
 // GetByPRD retrieves all priority scores for a PRD

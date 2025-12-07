@@ -160,7 +160,7 @@ func (c *Client) GetProjects(ctx context.Context) ([]Project, error) {
 
 // GetProject retrieves a project by key
 func (c *Client) GetProject(ctx context.Context, projectKey string) (*Project, error) {
-	resp, err := c.doRequest(ctx, "GET", baseAPIPath+"/project/"+projectKey, nil)
+	resp, err := c.doRequest(ctx, "GET", baseAPIPath+"/project/"+url.PathEscape(projectKey), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ type IssueType struct {
 
 // GetIssueTypes retrieves issue types for a project
 func (c *Client) GetIssueTypes(ctx context.Context, projectKey string) ([]IssueType, error) {
-	resp, err := c.doRequest(ctx, "GET", baseAPIPath+"/project/"+projectKey+"/statuses", nil)
+	resp, err := c.doRequest(ctx, "GET", baseAPIPath+"/project/"+url.PathEscape(projectKey)+"/statuses", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ type Status struct {
 
 // GetStatuses retrieves all statuses for a project
 func (c *Client) GetStatuses(ctx context.Context, projectKey string) ([]Status, error) {
-	resp, err := c.doRequest(ctx, "GET", baseAPIPath+"/project/"+projectKey+"/statuses", nil)
+	resp, err := c.doRequest(ctx, "GET", baseAPIPath+"/project/"+url.PathEscape(projectKey)+"/statuses", nil)
 	if err != nil {
 		return nil, err
 	}

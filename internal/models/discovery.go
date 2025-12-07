@@ -164,11 +164,8 @@ type AIInsights struct {
 }
 
 // Value implements driver.Valuer for database storage
-func (a *AIInsights) Value() (driver.Value, error) {
-	if a == nil {
-		return nil, nil
-	}
-	return json.Marshal(a)
+func (a AIInsights) Value() (driver.Value, error) {
+	return json.Marshal(&a)
 }
 
 // Scan implements sql.Scanner for database retrieval

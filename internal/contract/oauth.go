@@ -2,6 +2,7 @@ package contract
 
 import (
 	"context"
+	"time"
 
 	"github.com/K-H-Tech/apm/internal/models"
 	"github.com/google/uuid"
@@ -100,7 +101,7 @@ type UserRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 
 	// Token operations
-	UpdateAtlassianTokens(ctx context.Context, userID uuid.UUID, accessToken, refreshToken string, expiresAt interface{}) error
+	UpdateAtlassianTokens(ctx context.Context, userID uuid.UUID, accessToken, refreshToken string, expiresAt time.Time) error
 }
 
 // OrganizationService defines organization management operations

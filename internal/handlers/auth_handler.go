@@ -3,6 +3,8 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -38,6 +40,20 @@ type AuthHandlerConfig struct {
 
 // NewAuthHandler creates a new auth handler
 func NewAuthHandler(config AuthHandlerConfig) *AuthHandler {
+	// Validate required dependencies
+	if config.OAuthClient == nil {
+		panic("AuthHandlerConfig: OAuthClient is required")
+	}
+	if config.UserRepo == nil {
+		panic("AuthHandlerConfig: UserRepo is required")
+	}
+	if config.OrgRepo == nil {
+		panic("AuthHandlerConfig: OrgRepo is required")
+	}
+	if config.Encrypter == nil {
+		panic("AuthHandlerConfig: Encrypter is required")
+	}
+
 	return &AuthHandler{
 		oauthClient: config.OAuthClient,
 		stateStore:  atlassian.NewSimpleStateStore(10 * time.Minute),
@@ -48,11 +64,17 @@ func NewAuthHandler(config AuthHandlerConfig) *AuthHandler {
 }
 
 // RegisterRoutes registers auth routes
+// NOTE: /refresh, /me, /logout endpoints need auth middleware.
+// Currently registered outside /api/v1 group that has AuthMiddleware.
+// Consider moving to authenticated group or applying middleware here.
 func (h *AuthHandler) RegisterRoutes(r *gin.RouterGroup) {
 	auth := r.Group("/auth")
 	{
+		// Public routes - no auth required
 		auth.GET("/atlassian", h.InitiateOAuth)
 		auth.GET("/atlassian/callback", h.HandleCallback)
+		// Protected routes - require authentication
+		// TODO: Apply auth middleware to these endpoints
 		auth.POST("/refresh", h.RefreshToken)
 		auth.GET("/me", h.GetCurrentUser)
 		auth.POST("/logout", h.Logout)
@@ -111,7 +133,9 @@ func (h *AuthHandler) HandleCallback(c *gin.Context) {
 	// Exchange code for tokens
 	tokens, err := h.oauthClient.ExchangeCode(ctx, code)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		// Don't expose internal error details to clients
+		log.Printf("OAuth code exchange failed: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to exchange authorization code"})
 		return
 	}
 
@@ -146,8 +170,14 @@ func (h *AuthHandler) HandleCallback(c *gin.Context) {
 
 	// Check if user exists
 	user, err := h.userRepo.GetByAtlassianAccountID(ctx, userInfo.AccountID)
+	if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
+		// Database error (not "not found")
+		log.Printf("Failed to lookup user by Atlassian account ID: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to lookup user"})
+		return
+	}
 	if err != nil {
-		// Create new user
+		// User not found - create new user
 		user = &models.User{
 			ID:                             uuid.New(),
 			Email:                          userInfo.Email,
@@ -190,15 +220,18 @@ func (h *AuthHandler) HandleCallback(c *gin.Context) {
 				JiraBaseURL: resource.URL,
 			}
 			if err := h.orgRepo.Create(ctx, org); err != nil {
+				log.Printf("Warning: failed to create organization %s: %v", org.Name, err)
 				continue
 			}
 
 			// Add user as admin
-			h.orgRepo.AddUserToOrganization(ctx, &models.OrganizationMember{
+			if err := h.orgRepo.AddUserToOrganization(ctx, &models.OrganizationMember{
 				OrganizationID: org.ID,
 				UserID:         user.ID,
 				Role:           models.RoleAdmin,
-			})
+			}); err != nil {
+				log.Printf("Warning: failed to add user %s to organization %s: %v", user.ID, org.ID, err)
+			}
 		}
 
 		organizations = append(organizations, map[string]string{
@@ -207,7 +240,10 @@ func (h *AuthHandler) HandleCallback(c *gin.Context) {
 		})
 	}
 
-	// Generate session token (in production, use JWT)
+	// Generate session token
+	// TODO: Session token is not persisted server-side. For production, use:
+	// - Signed JWTs that can be validated without server-side storage, OR
+	// - Store session tokens in database/Redis associated with user
 	sessionToken, err := generateRandomState()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate session"})
@@ -266,7 +302,9 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	// Refresh tokens
 	tokens, err := h.oauthClient.RefreshToken(ctx, refreshToken)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		// Don't expose internal error details to clients
+		log.Printf("Token refresh failed for user %s: %v", userID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to refresh token"})
 		return
 	}
 

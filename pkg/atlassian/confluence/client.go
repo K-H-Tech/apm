@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,6 +36,7 @@ const (
 
 // Client is a Confluence REST API client
 type Client struct {
+	mu          sync.RWMutex
 	cloudID     string
 	accessToken string
 	httpClient  *http.Client
@@ -63,8 +67,10 @@ func NewClient(config ClientConfig) *Client {
 	}
 }
 
-// SetAccessToken updates the access token
+// SetAccessToken updates the access token (thread-safe)
 func (c *Client) SetAccessToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.accessToken = token
 }
 
@@ -85,7 +91,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	// Thread-safe access to token
+	c.mu.RLock()
+	token := c.accessToken
+	c.mu.RUnlock()
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -307,6 +317,12 @@ type UpdatePageRequest struct {
 
 // UpdatePage updates an existing page
 func (c *Client) UpdatePage(ctx context.Context, pageID string, req *UpdatePageRequest) (*Page, error) {
+	// Ensure consistency between pageID parameter and request body ID
+	if req.ID != "" && req.ID != pageID {
+		return nil, fmt.Errorf("%w: pageID parameter does not match request body ID", ErrBadRequest)
+	}
+	req.ID = pageID // Ensure request body has the correct ID
+
 	resp, err := c.doRequest(ctx, "PUT", baseAPIPath+"/pages/"+pageID, req)
 	if err != nil {
 		return nil, err
@@ -384,9 +400,14 @@ func (c *Client) GetChildPages(ctx context.Context, pageID string, limit int, cu
 
 // SearchPages searches for pages
 func (c *Client) SearchPages(ctx context.Context, query string, spaceKey string, limit int) ([]Page, error) {
-	cql := fmt.Sprintf("type=page AND text~\"%s\"", query)
+	// Escape CQL special characters to prevent injection
+	escapedQuery := strings.ReplaceAll(query, `\`, `\\`)
+	escapedQuery = strings.ReplaceAll(escapedQuery, `"`, `\"`)
+	cql := fmt.Sprintf(`type=page AND text~"%s"`, escapedQuery)
 	if spaceKey != "" {
-		cql = fmt.Sprintf("%s AND space=\"%s\"", cql, spaceKey)
+		escapedKey := strings.ReplaceAll(spaceKey, `\`, `\\`)
+		escapedKey = strings.ReplaceAll(escapedKey, `"`, `\"`)
+		cql = fmt.Sprintf(`%s AND space="%s"`, cql, escapedKey)
 	}
 
 	params := url.Values{
@@ -480,7 +501,8 @@ func (c *Client) RemoveLabel(ctx context.Context, pageID, labelID string) error 
 func StorageFormatFromMarkdown(markdown string) string {
 	// Simple conversion - in production, use a proper markdown to storage converter
 	// This just wraps the content in a basic structure
-	return fmt.Sprintf("<p>%s</p>", markdown)
+	// HTML escape to prevent XSS injection
+	return fmt.Sprintf("<p>%s</p>", html.EscapeString(markdown))
 }
 
 // StorageFormatFromHTML wraps HTML content for Confluence storage format
@@ -545,96 +567,99 @@ type MetricContent struct {
 }
 
 // formatPRDToStorage converts PRD content to Confluence storage format
+// All user content is HTML-escaped to prevent XSS injection
 func formatPRDToStorage(content PRDContent) string {
-	var html string
+	var result string
 
 	// Overview
 	if content.Overview != "" {
-		html += fmt.Sprintf(`<h2>Overview</h2><p>%s</p>`, content.Overview)
+		result += fmt.Sprintf(`<h2>Overview</h2><p>%s</p>`, html.EscapeString(content.Overview))
 	}
 
 	// Problem Statement
 	if content.ProblemStatement != "" {
-		html += fmt.Sprintf(`<h2>Problem Statement</h2><p>%s</p>`, content.ProblemStatement)
+		result += fmt.Sprintf(`<h2>Problem Statement</h2><p>%s</p>`, html.EscapeString(content.ProblemStatement))
 	}
 
 	// Goals
 	if len(content.Goals) > 0 {
-		html += `<h2>Goals</h2><ul>`
+		result += `<h2>Goals</h2><ul>`
 		for _, g := range content.Goals {
-			html += fmt.Sprintf(`<li>%s</li>`, g)
+			result += fmt.Sprintf(`<li>%s</li>`, html.EscapeString(g))
 		}
-		html += `</ul>`
+		result += `</ul>`
 	}
 
 	// Non-Goals
 	if len(content.NonGoals) > 0 {
-		html += `<h2>Non-Goals</h2><ul>`
+		result += `<h2>Non-Goals</h2><ul>`
 		for _, ng := range content.NonGoals {
-			html += fmt.Sprintf(`<li>%s</li>`, ng)
+			result += fmt.Sprintf(`<li>%s</li>`, html.EscapeString(ng))
 		}
-		html += `</ul>`
+		result += `</ul>`
 	}
 
 	// User Personas
 	if len(content.UserPersonas) > 0 {
-		html += `<h2>User Personas</h2>`
+		result += `<h2>User Personas</h2>`
 		for _, p := range content.UserPersonas {
-			html += fmt.Sprintf(`<h3>%s</h3><p>%s</p>`, p.Name, p.Description)
+			result += fmt.Sprintf(`<h3>%s</h3><p>%s</p>`, html.EscapeString(p.Name), html.EscapeString(p.Description))
 			if len(p.Goals) > 0 {
-				html += `<p><strong>Goals:</strong></p><ul>`
+				result += `<p><strong>Goals:</strong></p><ul>`
 				for _, g := range p.Goals {
-					html += fmt.Sprintf(`<li>%s</li>`, g)
+					result += fmt.Sprintf(`<li>%s</li>`, html.EscapeString(g))
 				}
-				html += `</ul>`
+				result += `</ul>`
 			}
 		}
 	}
 
 	// User Stories
 	if len(content.UserStories) > 0 {
-		html += `<h2>User Stories</h2>`
+		result += `<h2>User Stories</h2>`
 		for i, s := range content.UserStories {
-			html += fmt.Sprintf(`<h3>Story %d</h3>`, i+1)
-			html += fmt.Sprintf(`<p><strong>As a</strong> %s, <strong>I want</strong> %s, <strong>so that</strong> %s</p>`, s.AsA, s.IWant, s.SoThat)
+			result += fmt.Sprintf(`<h3>Story %d</h3>`, i+1)
+			result += fmt.Sprintf(`<p><strong>As a</strong> %s, <strong>I want</strong> %s, <strong>so that</strong> %s</p>`,
+				html.EscapeString(s.AsA), html.EscapeString(s.IWant), html.EscapeString(s.SoThat))
 			if len(s.Criteria) > 0 {
-				html += `<p><strong>Acceptance Criteria:</strong></p><ul>`
+				result += `<p><strong>Acceptance Criteria:</strong></p><ul>`
 				for _, c := range s.Criteria {
-					html += fmt.Sprintf(`<li>%s</li>`, c)
+					result += fmt.Sprintf(`<li>%s</li>`, html.EscapeString(c))
 				}
-				html += `</ul>`
+				result += `</ul>`
 			}
 		}
 	}
 
 	// Success Metrics
 	if len(content.SuccessMetrics) > 0 {
-		html += `<h2>Success Metrics</h2>`
-		html += `<table><thead><tr><th>Metric</th><th>Target</th><th>Current</th></tr></thead><tbody>`
+		result += `<h2>Success Metrics</h2>`
+		result += `<table><thead><tr><th>Metric</th><th>Target</th><th>Current</th></tr></thead><tbody>`
 		for _, m := range content.SuccessMetrics {
-			html += fmt.Sprintf(`<tr><td>%s</td><td>%s</td><td>%s</td></tr>`, m.Name, m.Target, m.Current)
+			result += fmt.Sprintf(`<tr><td>%s</td><td>%s</td><td>%s</td></tr>`,
+				html.EscapeString(m.Name), html.EscapeString(m.Target), html.EscapeString(m.Current))
 		}
-		html += `</tbody></table>`
+		result += `</tbody></table>`
 	}
 
 	// Technical Approach
 	if content.TechnicalApproach != "" {
-		html += fmt.Sprintf(`<h2>Technical Approach</h2><p>%s</p>`, content.TechnicalApproach)
+		result += fmt.Sprintf(`<h2>Technical Approach</h2><p>%s</p>`, html.EscapeString(content.TechnicalApproach))
 	}
 
 	// Timeline
 	if content.Timeline != "" {
-		html += fmt.Sprintf(`<h2>Timeline</h2><p>%s</p>`, content.Timeline)
+		result += fmt.Sprintf(`<h2>Timeline</h2><p>%s</p>`, html.EscapeString(content.Timeline))
 	}
 
 	// Open Questions
 	if len(content.OpenQuestions) > 0 {
-		html += `<h2>Open Questions</h2><ul>`
+		result += `<h2>Open Questions</h2><ul>`
 		for _, q := range content.OpenQuestions {
-			html += fmt.Sprintf(`<li>%s</li>`, q)
+			result += fmt.Sprintf(`<li>%s</li>`, html.EscapeString(q))
 		}
-		html += `</ul>`
+		result += `</ul>`
 	}
 
-	return html
+	return result
 }

@@ -2,13 +2,15 @@ package atlassian
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -105,8 +107,8 @@ func (c *OAuthClient) ExchangeCode(ctx context.Context, code string) (*TokenResp
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("%w: %s", ErrTokenExchangeFailed, string(body))
+		// Don't expose raw API response body - could contain sensitive info
+		return nil, fmt.Errorf("%w: status code %d", ErrTokenExchangeFailed, resp.StatusCode)
 	}
 
 	var tokenResp TokenResponse
@@ -139,8 +141,8 @@ func (c *OAuthClient) RefreshToken(ctx context.Context, refreshToken string) (*T
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("%w: %s", ErrTokenRefreshFailed, string(body))
+		// Don't expose raw API response body - could contain sensitive info
+		return nil, fmt.Errorf("%w: status code %d", ErrTokenRefreshFailed, resp.StatusCode)
 	}
 
 	var tokenResp TokenResponse
@@ -176,8 +178,8 @@ func (c *OAuthClient) GetUserInfo(ctx context.Context, accessToken string) (*Use
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get user info: %s", string(body))
+		// Don't expose raw API response body - could contain PII
+		return nil, fmt.Errorf("failed to get user info: status code %d", resp.StatusCode)
 	}
 
 	var userInfo UserInfo
@@ -213,8 +215,8 @@ func (c *OAuthClient) GetAccessibleResources(ctx context.Context, accessToken st
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get accessible resources: %s", string(body))
+		// Don't expose raw API response body - could contain sensitive info
+		return nil, fmt.Errorf("failed to get accessible resources: status code %d", resp.StatusCode)
 	}
 
 	var resources []AccessibleResource
@@ -254,27 +256,74 @@ type StateGenerator interface {
 	Validate(state string) bool
 }
 
-// SimpleStateStore is a simple in-memory state store (use Redis in production)
+// SimpleStateStore is a simple in-memory state store (use Redis in production).
+// It is thread-safe and includes automatic cleanup of expired states.
 type SimpleStateStore struct {
-	states map[string]time.Time
-	ttl    time.Duration
+	mu       sync.Mutex
+	states   map[string]time.Time
+	ttl      time.Duration
+	stopChan chan struct{}
+	stopOnce sync.Once
 }
 
-// NewSimpleStateStore creates a new simple state store
+// NewSimpleStateStore creates a new simple state store with automatic cleanup.
+// Call Stop() when the store is no longer needed to stop the cleanup goroutine.
 func NewSimpleStateStore(ttl time.Duration) *SimpleStateStore {
-	return &SimpleStateStore{
-		states: make(map[string]time.Time),
-		ttl:    ttl,
+	s := &SimpleStateStore{
+		states:   make(map[string]time.Time),
+		ttl:      ttl,
+		stopChan: make(chan struct{}),
 	}
+	// Start background cleanup goroutine
+	go s.cleanupLoop()
+	return s
+}
+
+// cleanupLoop periodically removes expired states
+func (s *SimpleStateStore) cleanupLoop() {
+	ticker := time.NewTicker(s.ttl)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.Cleanup()
+		case <-s.stopChan:
+			return
+		}
+	}
+}
+
+// Stop stops the cleanup goroutine. Should be called when the store is no longer needed.
+// Safe to call multiple times.
+func (s *SimpleStateStore) Stop() {
+	s.stopOnce.Do(func() {
+		close(s.stopChan)
+	})
+}
+
+// Generate generates a cryptographically secure random state token and stores it.
+// Implements the StateGenerator interface.
+func (s *SimpleStateStore) Generate() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	state := base64.URLEncoding.EncodeToString(b)
+	s.Store(state)
+	return state, nil
 }
 
 // Store stores a state token
 func (s *SimpleStateStore) Store(state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.states[state] = time.Now().Add(s.ttl)
 }
 
 // Validate validates and consumes a state token
 func (s *SimpleStateStore) Validate(state string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	expiry, ok := s.states[state]
 	if !ok {
 		return false
@@ -285,6 +334,8 @@ func (s *SimpleStateStore) Validate(state string) bool {
 
 // Cleanup removes expired states
 func (s *SimpleStateStore) Cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := time.Now()
 	for state, expiry := range s.states {
 		if now.After(expiry) {

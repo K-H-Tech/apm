@@ -5,11 +5,21 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/K-H-Tech/apm/internal/models"
 	"github.com/google/uuid"
 )
+
+// escapeLikePattern escapes LIKE special characters to prevent injection
+func escapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
+}
 
 var (
 	// ErrPRDNotFound is returned when a PRD is not found
@@ -102,7 +112,10 @@ func (r *PRDRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.PRD,
 	}
 
 	if templateID.Valid {
-		tid, _ := uuid.Parse(templateID.String)
+		tid, err := uuid.Parse(templateID.String)
+		if err != nil {
+			return nil, fmt.Errorf("invalid template_id UUID: %w", err)
+		}
 		prd.TemplateID = &tid
 	}
 	prd.JiraEpicKey = jiraEpicKey.String
@@ -229,7 +242,10 @@ func (r *PRDRepository) ListByOrganization(ctx context.Context, orgID uuid.UUID,
 		}
 
 		if templateID.Valid {
-			tid, _ := uuid.Parse(templateID.String)
+			tid, err := uuid.Parse(templateID.String)
+			if err != nil {
+				return nil, 0, fmt.Errorf("invalid template_id UUID: %w", err)
+			}
 			prd.TemplateID = &tid
 		}
 		prd.JiraEpicKey = jiraEpicKey.String
@@ -293,7 +309,10 @@ func (r *PRDRepository) ListByOwner(ctx context.Context, ownerID uuid.UUID, limi
 		}
 
 		if templateID.Valid {
-			tid, _ := uuid.Parse(templateID.String)
+			tid, err := uuid.Parse(templateID.String)
+			if err != nil {
+				return nil, 0, fmt.Errorf("invalid template_id UUID: %w", err)
+			}
 			prd.TemplateID = &tid
 		}
 		prd.JiraEpicKey = jiraEpicKey.String
@@ -357,7 +376,10 @@ func (r *PRDRepository) ListByStatus(ctx context.Context, orgID uuid.UUID, statu
 		}
 
 		if templateID.Valid {
-			tid, _ := uuid.Parse(templateID.String)
+			tid, err := uuid.Parse(templateID.String)
+			if err != nil {
+				return nil, 0, fmt.Errorf("invalid template_id UUID: %w", err)
+			}
 			prd.TemplateID = &tid
 		}
 		prd.JiraEpicKey = jiraEpicKey.String
@@ -496,7 +518,7 @@ func (r *PRDRepository) Search(ctx context.Context, orgID uuid.UUID, query strin
 		WHERE organization_id = $1
 		AND (title ILIKE $2 OR content::text ILIKE $2)
 	`
-	searchPattern := "%" + query + "%"
+	searchPattern := "%" + escapeLikePattern(query) + "%"
 	var total int
 	if err := r.db.QueryRowContext(ctx, countQuery, orgID, searchPattern).Scan(&total); err != nil {
 		return nil, 0, err
@@ -542,7 +564,10 @@ func (r *PRDRepository) Search(ctx context.Context, orgID uuid.UUID, query strin
 		}
 
 		if templateID.Valid {
-			tid, _ := uuid.Parse(templateID.String)
+			tid, err := uuid.Parse(templateID.String)
+			if err != nil {
+				return nil, 0, fmt.Errorf("invalid template_id UUID: %w", err)
+			}
 			prd.TemplateID = &tid
 		}
 		prd.JiraEpicKey = jiraEpicKey.String

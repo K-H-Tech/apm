@@ -14,7 +14,7 @@ var (
 	ErrInvalidImpact = errors.New("impact must be one of: 25, 50, 100, 200, 300")
 
 	// ErrInvalidConfidence is returned when confidence is invalid
-	ErrInvalidConfidence = errors.New("confidence must be between 50 and 100")
+	ErrInvalidConfidence = errors.New("confidence must be one of: 50, 80, 100")
 
 	// ErrInvalidEffort is returned when effort is invalid
 	ErrInvalidEffort = errors.New("effort must be greater than 0")
@@ -73,7 +73,9 @@ func (r *RICECalculator) Validate(params *models.RICEParams) error {
 		return ErrInvalidImpact
 	}
 
-	if params.Confidence < 50 || params.Confidence > 100 {
+	// Valid confidence values: 50 (low), 80 (medium), 100 (high)
+	validConfidence := map[int]bool{50: true, 80: true, 100: true}
+	if !validConfidence[params.Confidence] {
 		return ErrInvalidConfidence
 	}
 

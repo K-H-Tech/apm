@@ -203,3 +203,88 @@ Extract and structure the following from the notes:
 For each extracted item, indicate your confidence level (high, medium, low).
 
 Respond in JSON format with clearly labeled sections.`
+
+// NotesToPRDOutputSchema defines the expected JSON output structure for notes-to-PRD conversion
+var NotesToPRDOutputSchema = map[string]interface{}{
+	"type": "object",
+	"properties": map[string]interface{}{
+		"problems_discussed": map[string]interface{}{
+			"type": "array",
+			"items": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"problem":    map[string]interface{}{"type": "string"},
+					"confidence": map[string]interface{}{"type": "string", "enum": []string{"high", "medium", "low"}},
+				},
+				"required": []string{"problem", "confidence"},
+			},
+			"description": "Problems discussed that form the problem statement",
+		},
+		"user_mentions": map[string]interface{}{
+			"type": "array",
+			"items": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"user_type":  map[string]interface{}{"type": "string"},
+					"context":    map[string]interface{}{"type": "string"},
+					"confidence": map[string]interface{}{"type": "string", "enum": []string{"high", "medium", "low"}},
+				},
+				"required": []string{"user_type", "confidence"},
+			},
+			"description": "User types mentioned that map to personas",
+		},
+		"feature_ideas": map[string]interface{}{
+			"type": "array",
+			"items": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"feature":    map[string]interface{}{"type": "string"},
+					"context":    map[string]interface{}{"type": "string"},
+					"confidence": map[string]interface{}{"type": "string", "enum": []string{"high", "medium", "low"}},
+				},
+				"required": []string{"feature", "confidence"},
+			},
+			"description": "Feature ideas that map to user stories",
+		},
+		"success_criteria_mentioned": map[string]interface{}{
+			"type": "array",
+			"items": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"criterion":  map[string]interface{}{"type": "string"},
+					"confidence": map[string]interface{}{"type": "string", "enum": []string{"high", "medium", "low"}},
+				},
+				"required": []string{"criterion", "confidence"},
+			},
+			"description": "Success criteria mentioned for metrics",
+		},
+		"concerns_risks": map[string]interface{}{
+			"type": "array",
+			"items": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"concern":    map[string]interface{}{"type": "string"},
+					"type":       map[string]interface{}{"type": "string", "enum": []string{"assumption", "dependency", "risk"}},
+					"confidence": map[string]interface{}{"type": "string", "enum": []string{"high", "medium", "low"}},
+				},
+				"required": []string{"concern", "confidence"},
+			},
+			"description": "Concerns and risks for assumptions/dependencies",
+		},
+		"scope_discussions": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"in_scope": map[string]interface{}{
+					"type":  "array",
+					"items": map[string]interface{}{"type": "string"},
+				},
+				"out_of_scope": map[string]interface{}{
+					"type":  "array",
+					"items": map[string]interface{}{"type": "string"},
+				},
+			},
+			"description": "Scope discussions for in/out of scope items",
+		},
+	},
+	"required": []string{"problems_discussed", "feature_ideas"},
+}

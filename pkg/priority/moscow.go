@@ -30,7 +30,11 @@ func (m *MoSCoWCategorizer) ValidateCategory(category models.MoSCoWCategory) err
 }
 
 // GetPriority returns the numeric priority for a category (lower = higher priority)
+// Returns 0 for invalid categories
 func (m *MoSCoWCategorizer) GetPriority(category models.MoSCoWCategory) int {
+	if err := m.ValidateCategory(category); err != nil {
+		return 0
+	}
 	return category.Priority()
 }
 
@@ -179,10 +183,15 @@ type MoSCoWDistribution struct {
 }
 
 // CalculateDistribution calculates the distribution of categories
+// Invalid categories are skipped and not counted in the total
 func (m *MoSCoWCategorizer) CalculateDistribution(categories []models.MoSCoWCategory) *MoSCoWDistribution {
 	dist := &MoSCoWDistribution{}
 
 	for _, cat := range categories {
+		// Skip invalid categories
+		if err := m.ValidateCategory(cat); err != nil {
+			continue
+		}
 		switch cat {
 		case models.MoSCoWMust:
 			dist.MustCount++
@@ -195,7 +204,8 @@ func (m *MoSCoWCategorizer) CalculateDistribution(categories []models.MoSCoWCate
 		}
 	}
 
-	dist.Total = len(categories)
+	// Total is the count of valid categories
+	dist.Total = dist.MustCount + dist.ShouldCount + dist.CouldCount + dist.WontCount
 	if dist.Total > 0 {
 		dist.MustPercent = float64(dist.MustCount) / float64(dist.Total) * 100
 	}

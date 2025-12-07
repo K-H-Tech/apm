@@ -13,6 +13,7 @@ type (
 		Port               string        `json:"PORT" yaml:"PORT"`
 		Host               string        `json:"HOST" yaml:"HOST"`
 		DBName             string        `json:"DB_NAME" yaml:"DB_NAME"`
+		SSLMode            string        `json:"SSL_MODE" yaml:"SSL_MODE"`
 		MaxOpenConnections int           `json:"MAX_OPEN_CONNECTIONS" yaml:"MAX_OPEN_CONNECTIONS"`
 		MaxIdleConnections int           `json:"MAX_IDLE_CONNECTIONS" yaml:"MAX_IDLE_CONNECTIONS"`
 		ConnMaxLifetime    time.Duration `json:"CONN_MAX_LIFETIME" yaml:"CONN_MAX_LIFETIME"`

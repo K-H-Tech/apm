@@ -43,14 +43,26 @@ func NewAnthropicProvider(config *Config) (*AnthropicProvider, error) {
 		model = "claude-3-sonnet-20240229"
 	}
 
+	// Default timeout if not configured to prevent hanging requests
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = 60 * time.Second
+	}
+
+	// Default maxTokens if not configured
+	maxTokens := config.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 4096
+	}
+
 	return &AnthropicProvider{
 		apiKey:      config.AnthropicAPIKey,
 		baseURL:     baseURL,
 		model:       model,
-		maxTokens:   config.MaxTokens,
+		maxTokens:   maxTokens,
 		temperature: config.Temperature,
 		httpClient: &http.Client{
-			Timeout: config.Timeout,
+			Timeout: timeout,
 		},
 	}, nil
 }
@@ -112,9 +124,11 @@ func (a *AnthropicProvider) GenerateText(ctx context.Context, req contract.Gener
 		maxTokens = a.maxTokens
 	}
 
-	temperature := req.Temperature
-	if temperature == 0 {
-		temperature = a.temperature
+	// Use provider default temperature only if request temperature is not explicitly set
+	// Temperature of 0 means "use provider default" - use small positive value (0.01) for deterministic output
+	temperature := a.temperature
+	if req.Temperature > 0 {
+		temperature = req.Temperature
 	}
 
 	msgReq := anthropicMessageRequest{
@@ -191,20 +205,34 @@ func (a *AnthropicProvider) GenerateStructured(ctx context.Context, req contract
 }
 
 // StreamText streams text generation
+// TODO: This implementation uses simplified SSE parsing. For production use,
+// consider implementing proper SSE parsing with event type handling.
 func (a *AnthropicProvider) StreamText(ctx context.Context, req contract.GenerateRequest) (<-chan contract.StreamChunk, error) {
 	ch := make(chan contract.StreamChunk)
 
 	go func() {
 		defer close(ch)
 
+		// Use request values with provider defaults as fallback
+		model := req.Model
+		if model == "" {
+			model = a.model
+		}
+
+		maxTokens := req.MaxTokens
+		if maxTokens == 0 {
+			maxTokens = a.maxTokens
+		}
+
 		msgReq := anthropicMessageRequest{
-			Model: a.model,
+			Model: model,
 			Messages: []anthropicMessage{
 				{Role: "user", Content: req.Prompt},
 			},
-			System:    req.SystemPrompt,
-			MaxTokens: req.MaxTokens,
-			Stream:    true,
+			System:      req.SystemPrompt,
+			MaxTokens:   maxTokens,
+			Temperature: a.temperature,
+			Stream:      true,
 		}
 
 		body, err := json.Marshal(msgReq)
